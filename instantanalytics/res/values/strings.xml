@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Instant Analytics</string>
+    <string name="switch_account">Switch Account</string>
+    <string name="update_title">Update Title</string>
+    <string name="delete">Delete</string>
+</resources>

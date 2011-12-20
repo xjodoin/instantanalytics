@@ -14,6 +14,35 @@
 
 package com.instantanalytics;
 
+import java.io.IOException;
+import java.util.Date;
+import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+import android.accounts.Account;
+import android.accounts.AccountManager;
+import android.accounts.AccountManagerCallback;
+import android.accounts.AccountManagerFuture;
+import android.accounts.AuthenticatorException;
+import android.accounts.OperationCanceledException;
+import android.app.Activity;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.os.Bundle;
+import android.util.Log;
+import android.view.ContextMenu;
+import android.view.ContextMenu.ContextMenuInfo;
+import android.view.Menu;
+import android.view.MenuItem;
+import android.view.View;
+import android.widget.AdapterView;
+import android.widget.AdapterView.AdapterContextMenuInfo;
+import android.widget.AdapterView.OnItemClickListener;
+import android.widget.ArrayAdapter;
+import android.widget.ListView;
+import android.widget.TextView;
+
 import com.google.api.client.extensions.android2.AndroidHttp;
 import com.google.api.client.googleapis.GoogleHeaders;
 import com.google.api.client.googleapis.extensions.android2.auth.GoogleAccountManager;
@@ -24,54 +53,15 @@ import com.google.api.client.http.HttpTransport;
 import com.google.api.client.http.json.JsonHttpRequest;
 import com.google.api.client.http.json.JsonHttpRequestInitializer;
 import com.google.api.client.json.jackson.JacksonFactory;
-import com.google.api.client.util.DateTime;
 import com.google.api.services.analytics.Analytics;
-import com.google.api.services.analytics.Analytics.Management.Profiles;
+import com.google.api.services.analytics.Analytics.Data.Ga.Get;
 import com.google.api.services.analytics.AnalyticsRequest;
+import com.google.api.services.analytics.model.GaData;
 import com.google.api.services.analytics.model.Profile;
 import com.google.common.base.Function;
 import com.google.common.collect.Lists;
 
-import android.accounts.Account;
-import android.accounts.AccountManager;
-import android.accounts.AccountManagerCallback;
-import android.accounts.AccountManagerFuture;
-import android.accounts.AuthenticatorException;
-import android.accounts.OperationCanceledException;
-import android.app.ListActivity;
-import android.content.Intent;
-import android.content.SharedPreferences;
-import android.os.Bundle;
-import android.util.Log;
-import android.view.ContextMenu;
-import android.view.ContextMenu.ContextMenuInfo;
-import android.view.Menu;
-import android.view.MenuItem;
-import android.view.View;
-import android.widget.AdapterView.AdapterContextMenuInfo;
-import android.widget.ArrayAdapter;
-
-import java.io.IOException;
-import java.util.Date;
-import java.util.List;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-
-/**
- * Sample for Google Calendar Data API using the Atom wire format. It shows how
- * to authenticate, get calendars, add a new calendar, update it, and delete it.
- * <p>
- * To enable logging of HTTP requests/responses, change {@link #LOGGING_LEVEL}
- * to {@link Level#CONFIG} or {@link Level#ALL} and run this command:
- * </p>
- * 
- * <pre>
- * adb shell setprop log.tag.HttpTransport DEBUG
- * </pre>
- * 
- * @author Yaniv Inbar
- */
-public final class HelloAndroidActivity extends ListActivity {
+public final class ProfilesActivity extends Activity {
 
 	/** Logging level for HTTP requests/responses. */
 	private static Level LOGGING_LEVEL = Level.CONFIG;
@@ -90,9 +80,9 @@ public final class HelloAndroidActivity extends ListActivity {
 
 	private static final int REQUEST_AUTHENTICATE = 0;
 
-	Analytics client;
+	private Analytics client;
 
-	final HttpTransport transport = AndroidHttp.newCompatibleTransport();
+	private final HttpTransport transport = AndroidHttp.newCompatibleTransport();
 
 	String accountName;
 
@@ -104,46 +94,7 @@ public final class HelloAndroidActivity extends ListActivity {
 	SharedPreferences settings;
 	AnalyticsAndroidRequestInitializer requestInitializer;
 
-	public class AnalyticsAndroidRequestInitializer extends
-			CalendarRequestInitializer {
-
-		String authToken;
-
-		public AnalyticsAndroidRequestInitializer() {
-			super(transport);
-			authToken = settings.getString(PREF_AUTH_TOKEN, null);
-			setGsessionid(settings.getString(PREF_GSESSIONID, null));
-		}
-
-		@Override
-		public void intercept(HttpRequest request) throws IOException {
-			super.intercept(request);
-			request.getHeaders().setAuthorization(
-					GoogleHeaders.getGoogleLoginValue(authToken));
-		}
-
-		@Override
-		public boolean handleResponse(HttpRequest request,
-				HttpResponse response, boolean retrySupported)
-				throws IOException {
-			switch (response.getStatusCode()) {
-			case 302:
-				super.handleResponse(request, response, retrySupported);
-				SharedPreferences.Editor editor = settings.edit();
-				editor.putString(PREF_GSESSIONID, getGsessionid());
-				editor.commit();
-				return true;
-			case 401:
-				accountManager.invalidateAuthToken(authToken);
-				authToken = null;
-				SharedPreferences.Editor editor2 = settings.edit();
-				editor2.remove(PREF_AUTH_TOKEN);
-				editor2.commit();
-				return false;
-			}
-			return false;
-		}
-	}
+	private List<Profile> profiles;
 
 	@Override
 	public void onCreate(Bundle savedInstanceState) {
@@ -151,10 +102,11 @@ public final class HelloAndroidActivity extends ListActivity {
 		Logger.getLogger("com.google.api.client").setLevel(LOGGING_LEVEL);
 		accountManager = new GoogleAccountManager(this);
 		settings = this.getSharedPreferences(PREF, 0);
-		requestInitializer = new AnalyticsAndroidRequestInitializer();
+		requestInitializer = new AnalyticsAndroidRequestInitializer(transport,
+				settings, accountManager);
 		client = Analytics
 				.builder(transport, new JacksonFactory())
-				.setApplicationName("Google-AnalyticsSample/1.0")
+				.setApplicationName("InstantAnalytics/1.0")
 				.setHttpRequestInitializer(requestInitializer)
 				.setJsonHttpRequestInitializer(
 						new JsonHttpRequestInitializer() {
@@ -165,16 +117,46 @@ public final class HelloAndroidActivity extends ListActivity {
 							}
 						}).build();
 
-		getListView().setTextFilterEnabled(true);
+		setContentView(R.layout.main);
+
+		ListView listView = getListView();
+		listView.setTextFilterEnabled(true);
+
+		listView.setOnItemClickListener(new OnItemClickListener() {
+
+			@Override
+			public void onItemClick(AdapterView<?> arg0, View arg1,
+					int position, long id) {
+				Profile profile = profiles.get((int) id);
+				try {
+					showCurrentDay(profile);
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
+		});
+
 		registerForContextMenu(getListView());
 		gotAccount();
+
+	}
+
+	protected void showCurrentDay(Profile profile) throws IOException {
+
+		Intent intent = new Intent(this, DayView.class);
+		intent.putExtra("profileId", profile.getId());
+		startActivity(intent);
+	}
+
+	private ListView getListView() {
+		return (ListView) findViewById(R.id.profilesList);
 	}
 
 	void setAuthToken(String authToken) {
 		SharedPreferences.Editor editor = settings.edit();
 		editor.putString(PREF_AUTH_TOKEN, authToken);
 		editor.commit();
-		requestInitializer.authToken = authToken;
+		requestInitializer.setAuthToken(authToken);
 	}
 
 	void setAccountName(String accountName) {
@@ -190,7 +172,7 @@ public final class HelloAndroidActivity extends ListActivity {
 		Account account = accountManager.getAccountByName(accountName);
 		if (account != null) {
 			// handle invalid token
-			if (requestInitializer.authToken == null) {
+			if (requestInitializer.getAuthToken() == null) {
 				accountManager.manager.getAuthToken(account, AUTH_TOKEN_TYPE,
 						true, new AccountManagerCallback<Bundle>() {
 
@@ -221,7 +203,6 @@ public final class HelloAndroidActivity extends ListActivity {
 				try {
 					listAllProfiles();
 				} catch (IOException e) {
-					// TODO Auto-generated catch block
 					e.printStackTrace();
 				}
 			}
@@ -233,7 +214,7 @@ public final class HelloAndroidActivity extends ListActivity {
 	private void chooseAccount() {
 		accountManager.manager.getAuthTokenByFeatures(
 				GoogleAccountManager.ACCOUNT_TYPE, AUTH_TOKEN_TYPE, null,
-				HelloAndroidActivity.this, null, null,
+				ProfilesActivity.this, null, null,
 				new AccountManagerCallback<Bundle>() {
 
 					public void run(AccountManagerFuture<Bundle> future) {
@@ -272,7 +253,6 @@ public final class HelloAndroidActivity extends ListActivity {
 
 	@Override
 	public boolean onCreateOptionsMenu(Menu menu) {
-		menu.add(0, MENU_ADD, 0, getString(R.string.new_calendar));
 		if (accountManager.getAccounts().length >= 2) {
 			menu.add(0, MENU_ACCOUNTS, 0, getString(R.string.switch_account));
 		}
@@ -283,20 +263,6 @@ public final class HelloAndroidActivity extends ListActivity {
 	public boolean onOptionsItemSelected(MenuItem item) {
 		switch (item.getItemId()) {
 		case MENU_ADD:
-			// AnalyticsUrl url = forOwnCalendarsFeed();
-			// CalendarEntry calendar = new CalendarEntry();
-			// calendar.title = "Calendar " + new DateTime(new Date());
-			// try {
-			// client.calendarFeed().insert().execute(url, calendar);
-			// } catch (IOException e) {
-			// handleException(e);
-			// }
-			try {
-				listAllProfiles();
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
 			return true;
 		case MENU_ACCOUNTS:
 			chooseAccount();
@@ -317,6 +283,7 @@ public final class HelloAndroidActivity extends ListActivity {
 	public boolean onContextItemSelected(MenuItem item) {
 		AdapterContextMenuInfo info = (AdapterContextMenuInfo) item
 				.getMenuInfo();
+
 		// CalendarEntry calendar = calendars.get((int) info.id);
 		// try {
 		// switch (item.getItemId()) {
@@ -342,19 +309,20 @@ public final class HelloAndroidActivity extends ListActivity {
 
 	void listAllProfiles() throws IOException {
 
-		Profiles profiles = client.management().profiles();
-		com.google.api.services.analytics.model.Profiles profiles2 = profiles.list("~all", "~all").execute();
-		List<Profile> items = profiles2.getItems();
-		List<String> names = Lists.transform(items, new Function<Profile, String>() {
+		profiles = client.management().profiles().list("~all", "~all")
+				.execute().getItems();
 
-			@Override
-			public String apply(Profile profile) {
-				return profile.getName();
-			}
-		});
-		
-		setListAdapter(new ArrayAdapter<String>(this,
-				android.R.layout.simple_list_item_1, names));
+		List<String> names = Lists.transform(profiles,
+				new Function<Profile, String>() {
+					@Override
+					public String apply(Profile profile) {
+						return profile.getName();
+					}
+				});
+
+		getListView().setAdapter(
+				new ArrayAdapter<String>(this,
+						android.R.layout.simple_list_item_1, names));
 	}
 
 	void handleException(Exception e) {
