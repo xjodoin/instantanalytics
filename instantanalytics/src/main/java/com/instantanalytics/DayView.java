@@ -1,8 +1,14 @@
 package com.instantanalytics;
 
 import java.io.IOException;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 
 import com.google.api.client.extensions.android2.AndroidHttp;
 import com.google.api.client.googleapis.extensions.android2.auth.GoogleAccountManager;
@@ -18,6 +24,11 @@ import com.google.api.services.analytics.model.GaData;
 import android.app.Activity;
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.view.View;
+import android.widget.ArrayAdapter;
+import android.widget.Button;
+import android.widget.DatePicker;
+import android.widget.ListView;
 import android.widget.TextView;
 
 public class DayView extends Activity {
@@ -57,35 +68,53 @@ public class DayView extends Activity {
 		
 		String profileId = getIntent().getExtras().getString("profileId");
 		
-		TextView dayInfo = (TextView) findViewById(R.id.dateInfo);
+		TextView dayInfo =  (TextView) findViewById(R.id.date);
 		Date date = new Date();
-		java.text.DateFormat dateFormat = android.text.format.DateFormat.getDateFormat(getApplicationContext());
-		dayInfo.setText(dateFormat.format(date));
-		
-		
+		dayInfo.setText(DateFormat.getDateInstance(DateFormat.FULL).format(date));
 		try {
-			showDayData(profileId);
+			showDayData(date,profileId);
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
 		
 	}
 
-	private void showDayData(String profileId) throws IOException {
+	private void showDayData(Date date ,String profileId) throws IOException {
+		
+		SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd");
+		String dateString = simpleDateFormat.format(date);
+		
 		Get apiQuery = client.data().ga().get(
 			    "ga:"+profileId,                       // "ga:" + Profile Id.
-			    "2011-12-08",                   // Start date.
-			    "2011-12-08",                   // End date.
-			    "ga:visits,ga:pageviews");      // Metrics.
+			    dateString,                   // Start date.
+			    dateString,                   // End date.
+			    "ga:visits,ga:pageviews,ga:timeOnSite,ga:exits");      // Metrics.
+		
+		apiQuery.setDimensions("ga:source,ga:medium");
+//		apiQuery.setFilters("ga:medium==referral");
+		apiQuery.setSort("-ga:visits");
+//		apiQuery.setSegment("gaid::-11");
+		apiQuery.setMaxResults(50);
 
 		GaData execute = apiQuery.execute();
 		
-		TextView textView = (TextView) findViewById(R.id.analyticsData);
-		
-		List<String> entrySet = execute.getRows().get(0);
+		Map<String, String> totals = execute.getTotalsForAllResults();
+		List<String> data = new ArrayList<String>();
+		data.add("Visits: "+totals.get("ga:visits"));
+		data.add("Page views: "+totals.get("ga:pageviews"));
 
-		textView.setText("Visits: "+entrySet.get(0)+"\n"+"Page views: "+entrySet.get(1));
+		List<List<String>> rows = execute.getRows();
+		
+		for (List<String> row : rows) {
+			data.add(row.get(0)+": "+row.get(2));
+		}
+		
+		getListView().setAdapter(new ArrayAdapter<String>(this,
+				android.R.layout.simple_list_item_1, data));
 	}
 	
+	private ListView getListView() {
+		return (ListView) findViewById(R.id.data);
+	}
 	
 }
